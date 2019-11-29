@@ -33,3 +33,8 @@ python -u main.py --batch_size=80 --gpu=0,1
 python -u main.py --batch_size=40 --gpu=0,1
 
 ```
+
+Train with APEX for speeding up.
+```
+python -u main.py --batch_size=16 --gpu=0,1 --grad_max_norm=1 --apex
+```

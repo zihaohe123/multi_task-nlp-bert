@@ -17,6 +17,7 @@ def parser():
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--test', action='store_true', default=False, help='Whether to just test the model')
     parser.add_argument('--multi_task', action='store_true', default=False, help='Whether to use multi-task learning')
+    parser.add_argument('--apex', action='store_true', default=False, help='Whether to use APEX speed up.')
 
     parser.add_argument('--gpu', type=str, default='', help='which gpus to use')
     args = parser.parse_args()

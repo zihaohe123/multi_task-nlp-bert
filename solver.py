@@ -7,6 +7,8 @@ from utils import prepar_data
 from transformers import AdamW
 import time
 from utils import get_current_time, calc_eplased_time_since, to_device
+from apex import amp
+
 
 
 class Solver:
@@ -29,14 +31,6 @@ class Solver:
               '#test', len(test_loader.dataset))
 
         model = MultiTaskBert(args)
-
-        device_count = 0
-        if device == 'cuda':
-            device_count = torch.cuda.device_count()
-            if device_count > 1:
-                model = nn.DataParallel(model)
-            torch.backends.cudnn.benchmark = True
-            print("Let's use {} GPUs!".format(device_count))
         model.to(device)
 
         param_optimizer = list(model.named_parameters())
@@ -48,6 +42,17 @@ class Solver:
              'weight_decay_rate': 0.0}
         ]
         optimizer = AdamW(optimizer_grouped_parameters, lr=args.lr, weight_decay=5e-4)
+
+        if args.apex:
+            model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
+
+        device_count = 0
+        if device == 'cuda':
+            device_count = torch.cuda.device_count()
+            if device_count > 1:
+                model = nn.DataParallel(model)
+            torch.backends.cudnn.benchmark = True
+            print("Let's use {} GPUs!".format(device_count))
 
         criterion_classification = nn.CrossEntropyLoss()
         criterion_regression = nn.MSELoss()
@@ -146,10 +151,16 @@ class Solver:
             qnli_loss = self.criterion_classification(qnli_output, qnli_labels) if self.args.multi_task else 0
 
             loss = snli_loss + sst2_loss + stsb_loss + qnli_loss
-            loss.backward()
 
             if self.args.grad_max_norm > 0.:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.grad_max_norm)
+
+            if self.args.apex:
+                with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+
             self.optimizer.step()
 
             batch_size = snli_token_ids.shape[0]
