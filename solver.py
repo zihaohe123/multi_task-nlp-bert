@@ -84,6 +84,8 @@ class Solver:
             print('-'*20 + 'Epoch: {}, {}'.format(epoch, get_current_time()) + '-'*20)
             train_loss, train_acc = self.train_epoch()
             dev_loss, dev_acc = self.evaluate_epoch('Dev')
+            test_loss, test_acc = self.evaluate_epoch('Test')
+
             if dev_loss < best_loss:
                 best_loss = dev_loss
                 best_acc = dev_acc
@@ -95,21 +97,17 @@ class Solver:
                   'Elapsed Time: {}\n'
                   'Train Loss: {:.3f}, Train Acc: {:.3f}\n'
                   'Dev Loss: {:.3f}, Dev Acc: {:.3f}\n'
+                  'Test Loss: {:.3f}, Test Acc: {:.3f}\n'
                   'Best Dev Loss: {:.3f}, Best Dev Acc: {:.3f}, '
                   'Best Dev Acc Epoch: {:0>2d}\n'.format(epoch, self.args.epochs,
-                                                       calc_eplased_time_since(epoch_start_time),
-                                                       calc_eplased_time_since(train_start_time),
-                                                       train_loss, train_acc,
-                                                       dev_loss, dev_acc,
-                                                       best_loss, best_acc, best_epoch))
-
-            # LSTM learning rate decay
-            for param_group in self.optimizer.param_groups:
-                print('lr: {:.6f} -> {:.6f}\n'.format(param_group['lr'], param_group['lr'] * self.args.lr_decay))
-                param_group['lr'] *= self.args.lr_decay
+                                                         calc_eplased_time_since(epoch_start_time),
+                                                         calc_eplased_time_since(train_start_time),
+                                                         train_loss, train_acc,
+                                                         dev_loss, dev_acc,
+                                                         test_loss, test_acc,
+                                                         best_loss, best_acc, best_epoch))
 
         print('Training Finished!')
-
         self.test()
 
     def test(self):
@@ -186,7 +184,7 @@ class Solver:
         return train_loss, acc
 
     def evaluate_epoch(self, mode):
-        print('Evaluating....')
+        print('Evaluating....') if mode == 'Dev' else print('Testing....')
         self.model.eval()
         if mode == 'Dev':
             loader = self.dev_loader
