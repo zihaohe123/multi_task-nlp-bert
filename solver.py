@@ -9,7 +9,6 @@ import time
 from utils import get_current_time, calc_eplased_time_since, to_device
 
 
-
 class Solver:
     def __init__(self, args):
         # how to use GPUs
@@ -46,11 +45,9 @@ class Solver:
             from apex import amp
             model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
 
-        device_count = 0
         if device == 'cuda':
             device_count = torch.cuda.device_count()
-            if device_count > 1:
-                model = nn.DataParallel(model)
+            model = nn.DataParallel(model)
             torch.backends.cudnn.benchmark = True
             print("Let's use {} GPUs!".format(device_count))
 
