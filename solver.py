@@ -7,7 +7,6 @@ from utils import prepar_data
 from transformers import AdamW
 import time
 from utils import get_current_time, calc_eplased_time_since, to_device
-from apex import amp
 
 
 
@@ -44,6 +43,7 @@ class Solver:
         optimizer = AdamW(optimizer_grouped_parameters, lr=args.lr, weight_decay=5e-4)
 
         if args.apex:
+            from apex import amp
             model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
 
         device_count = 0
@@ -156,6 +156,7 @@ class Solver:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.grad_max_norm)
 
             if self.args.apex:
+                from apex import amp
                 with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()
             else:
