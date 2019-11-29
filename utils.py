@@ -86,7 +86,10 @@ def to_device(*data, device):
     for each in data:
         each = each.to(device)
         new_data.append(each)
-    return new_data
+    if len(new_data) == 1:
+        return new_data[0]
+    else:
+        return new_data
 
 
 if __name__ == '__main__':
