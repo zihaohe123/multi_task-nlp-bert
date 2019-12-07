@@ -162,40 +162,42 @@ def cat_train_dev(train_data, dev_data):
 
 
 class MultiTaskDataset(Dataset):
-    def __init__(self, path, phase):
+    def __init__(self, path, phase, multi_task=False):
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
         snli = GLUEData(path, 'SNLI', tokenizer, [5, 6, 0], {'entailment': 0, 'contradiction': 1, 'neutral': 2})
+        self.multi_task = multi_task
 
         if phase == 'train':
-            sst2 = GLUEData(path, 'SST-2', tokenizer, [0, 1], {'0': 0, '1': 0})
-            stsb = GLUEData(path, 'STS-B', tokenizer, [-3, -2, -1])
-            qnli = GLUEData(path, 'QNLI', tokenizer, [-3, -2, -1], {'entailment': 0, 'not_entailment': 1})
+            if multi_task:
+                # sst2 = GLUEData(path, 'SST-2', tokenizer, [0, 1], {'0': 0, '1': 0})
+                stsb = GLUEData(path, 'STS-B', tokenizer, [-3, -2, -1])
+                qnli = GLUEData(path, 'QNLI', tokenizer, [-3, -2, -1], {'entailment': 0, 'not_entailment': 1})
 
-            # we only focus on SNLI, so we don't evaluate the performance on other three datasets
-            # we just use all data for training
-            self.sst2_token_ids, self.sst2_token_lens, self.sst2_labels = \
-                cat_train_dev(sst2.get_data('train'), sst2.get_data('dev'))
-            self.stsb_token_ids, self.stsb_token_lens1, self.stsb_token_lens2, self.stsb_labels = cat_train_dev(
-                stsb.get_data('train'), stsb.get_data('dev'))
-            self.qnli_token_ids, self.qnli_token_lens1, self.qnli_token_lens2, self.qnli_labels = cat_train_dev(
-                qnli.get_data('train'), qnli.get_data('dev'))
+                # we only focus on SNLI, so we don't evaluate the performance on other three datasets
+                # we just use all data for training
+                # self.sst2_token_ids, self.sst2_token_lens, self.sst2_labels = \
+                #     cat_train_dev(sst2.get_data('train'), sst2.get_data('dev'))
+                self.stsb_token_ids, self.stsb_token_lens1, self.stsb_token_lens2, self.stsb_labels = cat_train_dev(
+                    stsb.get_data('train'), stsb.get_data('dev'))
+                self.qnli_token_ids, self.qnli_token_lens1, self.qnli_token_lens2, self.qnli_labels = cat_train_dev(
+                    qnli.get_data('train'), qnli.get_data('dev'))
 
-            self.sst2_len = self.sst2_token_ids.shape[0]
-            self.stsb_len = self.stsb_token_ids.shape[0]
-            self.qnli_len = self.qnli_token_ids.shape[0]
+                # self.sst2_len = self.sst2_token_ids.shape[0]
+                self.stsb_len = self.stsb_token_ids.shape[0]
+                self.qnli_len = self.qnli_token_ids.shape[0]
 
-            # shuffle the three datasets
-            idxes = torch.randperm(self.sst2_len)
-            self.sst2_token_ids, self.sst2_token_lens, self.sst2_labels = \
-                self.sst2_token_ids[idxes], self.sst2_token_lens[idxes], self.sst2_labels[idxes]
+                # shuffle the three datasets
+                # idxes = torch.randperm(self.sst2_len)
+                # self.sst2_token_ids, self.sst2_token_lens, self.sst2_labels = \
+                #     self.sst2_token_ids[idxes], self.sst2_token_lens[idxes], self.sst2_labels[idxes]
 
-            idxes = torch.randperm(self.stsb_len)
-            self.stsb_token_ids, self.stsb_token_lens1, self.stsb_token_lens2, self.stsb_labels = \
-                self.stsb_token_ids[idxes], self.stsb_token_lens1[idxes], self.stsb_token_lens2[idxes], self.stsb_labels[idxes]
+                idxes = torch.randperm(self.stsb_len)
+                self.stsb_token_ids, self.stsb_token_lens1, self.stsb_token_lens2, self.stsb_labels = \
+                    self.stsb_token_ids[idxes], self.stsb_token_lens1[idxes], self.stsb_token_lens2[idxes], self.stsb_labels[idxes]
 
-            idxes = torch.randperm(self.qnli_len)
-            self.qnli_token_ids, self.qnli_token_lens1, self.qnli_token_lens2, self.qnli_labels = \
-                self.qnli_token_ids[idxes], self.qnli_token_lens1[idxes], self.qnli_token_lens2[idxes], self.qnli_labels[idxes]
+                idxes = torch.randperm(self.qnli_len)
+                self.qnli_token_ids, self.qnli_token_lens1, self.qnli_token_lens2, self.qnli_labels = \
+                    self.qnli_token_ids[idxes], self.qnli_token_lens1[idxes], self.qnli_token_lens2[idxes], self.qnli_labels[idxes]
 
             self.snli_token_ids, self.snli_token_lens1, self.snli_token_lens2, self.snli_labels = snli.get_data('train')
 
@@ -212,19 +214,23 @@ class MultiTaskDataset(Dataset):
 
     def __getitem__(self, index):
         if self.phase == 'train':
-            # because the four datasets have different lengths, we need to over-sample the small datasets to make sure
-            # they have the same length with the largest dataset
-            sst2_index = index % self.sst2_len
-            stsb_index = index % self.stsb_len
-            qnli_index = index % self.qnli_len
+            if self.multi_task:
+                # because the four datasets have different lengths, we need to over-sample the small datasets to make sure
+                # they have the same length with the largest dataset
+                # sst2_index = index % self.sst2_len
+                stsb_index = index % self.stsb_len
+                qnli_index = index % self.qnli_len
 
-            return self.sst2_token_ids[sst2_index], self.sst2_token_lens[sst2_index], self.sst2_labels[sst2_index], \
-                   self.stsb_token_ids[stsb_index], self.stsb_token_lens1[stsb_index], \
-                   self.stsb_token_lens2[stsb_index], self.stsb_labels[stsb_index], \
-                   self.qnli_token_ids[qnli_index], self.qnli_token_lens1[qnli_index], \
-                   self.qnli_token_lens2[qnli_index], self.qnli_labels[qnli_index], \
-                   self.snli_token_ids[index], self.snli_token_lens1[index], \
-                   self.snli_token_lens2[index], self.snli_labels[index]
+                # return self.sst2_token_ids[sst2_index], self.sst2_token_lens[sst2_index], self.sst2_labels[sst2_index], \
+                return self.stsb_token_ids[stsb_index], self.stsb_token_lens1[stsb_index], \
+                       self.stsb_token_lens2[stsb_index], self.stsb_labels[stsb_index], \
+                       self.qnli_token_ids[qnli_index], self.qnli_token_lens1[qnli_index], \
+                       self.qnli_token_lens2[qnli_index], self.qnli_labels[qnli_index], \
+                       self.snli_token_ids[index], self.snli_token_lens1[index], \
+                       self.snli_token_lens2[index], self.snli_labels[index]
+
+            else:
+                return [None]*8 + [self.snli_token_ids[index], self.snli_token_lens1[index], self.snli_token_lens2[index], self.snli_labels[index]]
 
         else:
             return self.snli_token_ids[index], self.snli_token_lens1[index], self.snli_token_lens2[index], self.snli_labels[index]
@@ -257,13 +263,20 @@ def batchify_seq_pair(batch, token_ids_idx, token_lens1_idx, token_lens2_idx, to
 def batchify(batch):
     snli_token_ids, snli_seg_ids, snli_mask_ids, snli_labels = batchify_seq_pair(batch, -4, -3, -2, -1)
     # train
-    if len(batch[0]) == 15:
-        sst2_token_ids, sst2_mask_ids, sst2_labels = batchify_seq(batch, 0, 1, 2)
-        stsb_token_ids, stsb_seg_ids, stsb_mask_ids, stsb_labels = batchify_seq_pair(batch, 3, 4, 5, 6)
-        qnli_token_ids, qnli_seg_ids, qnli_mask_ids, qnli_labels = batchify_seq_pair(batch, 7, 8, 9, 10)
+    if len(batch[0]) != 4:
 
-        return sst2_token_ids, sst2_mask_ids, sst2_labels, \
-               stsb_token_ids, stsb_seg_ids, stsb_mask_ids, stsb_labels, \
+        if batch[0][0] is not None:
+            # sst2_token_ids, sst2_mask_ids, sst2_labels = batchify_seq(batch, 0, 1, 2)
+            stsb_token_ids, stsb_seg_ids, stsb_mask_ids, stsb_labels = batchify_seq_pair(batch, 0, 1, 2, 3)
+            qnli_token_ids, qnli_seg_ids, qnli_mask_ids, qnli_labels = batchify_seq_pair(batch, 4, 5, 6, 7)
+
+        else:
+            # sst2_token_ids, sst2_mask_ids, sst2_labels = None, None, None
+            stsb_token_ids, stsb_seg_ids, stsb_mask_ids, stsb_labels = None, None, None, None
+            qnli_token_ids, qnli_seg_ids, qnli_mask_ids, qnli_labels = None, None, None, None
+
+        # return sst2_token_ids, sst2_mask_ids, sst2_labels, \
+        return stsb_token_ids, stsb_seg_ids, stsb_mask_ids, stsb_labels, \
                qnli_token_ids, qnli_seg_ids, qnli_mask_ids, qnli_labels, \
                snli_token_ids, snli_seg_ids, snli_mask_ids, snli_labels
     # dev and test
@@ -271,21 +284,21 @@ def batchify(batch):
         return snli_token_ids, snli_seg_ids, snli_mask_ids, snli_labels
 
 
-def data_loader(path, batch_size, num_workers, pin_memory):
-    train_loader = DataLoader(MultiTaskDataset(path, 'train'),
+def data_loader(path, batch_size, multi_task, num_workers, pin_memory):
+    train_loader = DataLoader(MultiTaskDataset(path, 'train', multi_task),
                               batch_size=batch_size,
                               shuffle=True,
                               num_workers=num_workers,
                               pin_memory=pin_memory,
                               collate_fn=batchify)
 
-    dev_loader = DataLoader(MultiTaskDataset(path, 'dev'),
+    dev_loader = DataLoader(MultiTaskDataset(path, 'dev', multi_task),
                             batch_size=batch_size,
                             num_workers=num_workers,
                             pin_memory=pin_memory,
                             collate_fn=batchify)
 
-    test_loader = DataLoader(MultiTaskDataset(path, 'test'),
+    test_loader = DataLoader(MultiTaskDataset(path, 'test', multi_task),
                              batch_size=batch_size,
                              num_workers=num_workers,
                              pin_memory=pin_memory,

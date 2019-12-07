@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 import os
-from model import MultiTaskBert
+from model import MultiTaskBert, LossDropout, LBTW
 from dataset import data_loader
 from utils import prepar_data
 from transformers import AdamW
 import time
 from utils import get_current_time, calc_eplased_time_since, to_device
+from logger import Logger
 
 
 class Solver:
@@ -20,7 +21,7 @@ class Solver:
 
         # prepare data
         train_loader, dev_loader, test_loader = data_loader(
-            path=args.data_path, batch_size=args.batch_size,
+            path=args.data_path, batch_size=args.batch_size, multi_task=args.multi_task,
             num_workers=num_workers,
             pin_memory=device == 'cuda')
         print('#examples:',
@@ -40,6 +41,8 @@ class Solver:
              'weight_decay_rate': 0.0}
         ]
         optimizer = AdamW(optimizer_grouped_parameters, lr=args.lr, weight_decay=5e-4)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=len(train_loader)) \
+            if args.warm_restart else None
 
         if args.apex:
             from apex import amp
@@ -53,9 +56,13 @@ class Solver:
 
         criterion_classification = nn.CrossEntropyLoss()
         criterion_regression = nn.MSELoss()
+        loss_dropout = LossDropout(n=args.n_tasks_drop)
+        lbtw = LBTW(alpha=args.alpha)
 
+        current_time = get_current_time()
         name = 'multi_task_bert' if args.multi_task else 'single_task_bert'
-        ckpt_path = os.path.join('ckpt', '{}.pth'.format(name))
+        ckpt_path = os.path.join('ckpt', '{}_{}.pth'.format(name, current_time))
+        logger_path = os.path.join('logger', '{}_{}'.format(name, current_time))  # path for tensorboard
 
         batches = len(train_loader.dataset) // args.batch_size
         log_interval = batches // 30
@@ -63,10 +70,14 @@ class Solver:
         self.args = args
         self.model = model
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.criterion_classification = criterion_classification
         self.criterion_regression = criterion_regression
+        self.loss_dropout = loss_dropout
+        self.lbtw = lbtw
         self.device = device
         self.ckpt_path = ckpt_path
+        self.logger_path = logger_path
         self.train_loader = train_loader
         self.dev_loader = dev_loader
         self.test_loader = test_loader
@@ -78,11 +89,12 @@ class Solver:
         best_acc = 0.
         best_epoch = 0
 
+        logger = Logger(self.logger_path)
         train_start_time = time.time()
         for epoch in range(1, self.args.epochs + 1):
             epoch_start_time = time.time()
             print('-'*20 + 'Epoch: {}, {}'.format(epoch, get_current_time()) + '-'*20)
-            train_loss, train_acc = self.train_epoch()
+            train_loss, train_acc = self.train_epoch(epoch)
             dev_loss, dev_acc = self.evaluate_epoch('Dev')
             test_loss, test_acc = self.evaluate_epoch('Test')
 
@@ -96,9 +108,9 @@ class Solver:
                   'Epoch Training Time: {}\n'
                   'Elapsed Time: {}\n'
                   'Train Loss: {:.3f}, Train Acc: {:.3f}\n'
-                  'Dev Loss: {:.3f}, Dev Acc: {:.3f}\n'
+                  'Dev Loss: {:.3f}, Dev Acc: {:.4f}\n'
                   'Test Loss: {:.3f}, Test Acc: {:.3f}\n'
-                  'Best Dev Loss: {:.3f}, Best Dev Acc: {:.3f}, '
+                  'Best Dev Loss: {:.3f}, Best Dev Acc: {:.4f}, '
                   'Best Dev Acc Epoch: {:0>2d}\n'.format(epoch, self.args.epochs,
                                                          calc_eplased_time_since(epoch_start_time),
                                                          calc_eplased_time_since(train_start_time),
@@ -106,6 +118,20 @@ class Solver:
                                                          dev_loss, dev_acc,
                                                          test_loss, test_acc,
                                                          best_loss, best_acc, best_epoch))
+
+            # Log scalr values (scalar summary)
+            info = {
+                'overall/train_loss': train_loss,
+                'overall/dev_loss': dev_loss,
+                'overall/test_loss': test_loss,
+                'overall/best_train_loss': best_loss,
+                'snli/dev_acc': dev_acc,
+                'snli/test_acc': test_acc,
+                'snli/best_dev_acc': best_acc,
+                'snli/best_dev_acc_epoch': best_epoch,
+            }
+            for tag, value in info.items():
+                logger.scalar_summary(tag, value, epoch)
 
         print('Training Finished!')
         self.test()
@@ -117,35 +143,45 @@ class Solver:
         # Test
         print('Final result..............')
         test_loss, test_acc = self.evaluate_epoch('Test')
-        print('Test Loss: {:.3f}, Test Acc: {:.3f}'.format(test_loss, test_acc))
+        print('Test Loss: {:.4f}, Test Acc: {:.4f}'.format(test_loss, test_acc))
 
-    def train_epoch(self):
+    def train_epoch(self, epoch):
         self.model.train()
         train_loss = 0.
         example_count = 0
         correct = 0
         batch_start_time = time.time()
-        for batch_idx, (sst2_token_ids, sst2_mask_ids, sst2_labels,
+        for batch_idx, ( #sst2_token_ids, sst2_mask_ids, sst2_labels,
                         stsb_token_ids, stsb_seg_ids, stsb_mask_ids, stsb_labels,
                         qnli_token_ids, qnli_seg_ids, qnli_mask_ids, qnli_labels,
                         snli_token_ids, snli_seg_ids, snli_mask_ids, snli_labels) in enumerate(self.train_loader):
 
             output = self.model(snli_token_ids, snli_seg_ids, snli_mask_ids,
-                                sst2_token_ids, sst2_mask_ids,
+                                #sst2_token_ids, sst2_mask_ids,
                                 stsb_token_ids, stsb_seg_ids, stsb_mask_ids,
                                 qnli_token_ids, qnli_seg_ids, qnli_mask_ids)
 
-            snli_output, sst2_output, stsb_output, qnli_output = output
+            snli_output, stsb_output, qnli_output = output
 
-            snli_labels, sst2_labels, stsb_labels, qnli_labels = \
-                to_device(snli_labels, sst2_labels, stsb_labels, qnli_labels, device=self.device)
-            self.optimizer.zero_grad()
+            if not self.args.multi_task:
+                snli_labels = to_device(snli_labels, device=self.device)
+            else:
+                snli_labels, stsb_labels, qnli_labels = \
+                    to_device(snli_labels, stsb_labels, qnli_labels, device=self.device)
+
             snli_loss = self.criterion_classification(snli_output, snli_labels)
-            sst2_loss = self.criterion_classification(sst2_output, sst2_labels) if self.args.multi_task else 0
+            # sst2_loss = self.criterion_classification(sst2_output, sst2_labels) if self.args.multi_task else 0
             stsb_loss = self.criterion_regression(stsb_output, stsb_labels) if self.args.multi_task else 0
             qnli_loss = self.criterion_classification(qnli_output, qnli_labels) if self.args.multi_task else 0
 
-            loss = snli_loss + sst2_loss + stsb_loss + qnli_loss
+            if self.scheduler:
+                self.scheduler.step(epoch + batch_idx/len(self.train_loader))
+            self.optimizer.zero_grad()
+            if self.args.n_tasks_drop > 0:
+                snli_loss, stsb_loss, qnli_loss = self.loss_dropout(snli_loss, stsb_loss, qnli_loss)
+            if self.args.alpha != 0 and epoch > 1:
+                snli_loss, stsb_loss, qnli_loss = self.lbtw(snli_loss, stsb_loss, qnli_loss, batch_idx=0)
+            loss = snli_loss + stsb_loss + qnli_loss
 
             if self.args.grad_max_norm > 0.:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.grad_max_norm)
@@ -171,11 +207,10 @@ class Solver:
                       'Batch Training Time: {}, '
                       'Batch Loss: {:.3f}, '
                       'Batch SNLI Loss: {:.3f}, '
-                      'Batch SST-2 Loss: {:.3f}, '
                       'Batch STS-B Loss: {:.3f}, '
                       'Batch QNLI Loss: {:.3f}, '.format(batch_idx+1, len(self.train_loader),
                                                   calc_eplased_time_since(batch_start_time),
-                                                  loss, snli_loss, sst2_loss, stsb_loss, qnli_loss))
+                                                  loss, snli_loss, stsb_loss, qnli_loss))
                 batch_start_time = time.time()
 
         train_loss /= len(self.train_loader.dataset)

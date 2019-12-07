@@ -23,18 +23,13 @@ This is a multi-task learning so data would take a lot of memory, so we should u
 
 Train with max_grad_norm 1.0 with multi-task learning.
 ```
-python -u main.py --batch_size=16 --gpu=0,1 --grad_max_norm=1 --multi_task
-python -u main.py --batch_size=8 --gpu=0 --grad_max_norm=1 --multi_task
+python -u main.py --batch_size=32 --gpu=0,1 --grad_max_norm=1 --multi_task
+python -u main.py --batch_size=16 --gpu=0 --grad_max_norm=1 --multi_task
 ```
 
 Train without multi-task learning. Now we have less datasets to train so we could increase the batch size.
 ```
-python -u main.py --batch_size=80 --gpu=0,1
-python -u main.py --batch_size=40 --gpu=0,1
+python -u main.py --batch_size=64 --gpu=0,1
+python -u main.py --batch_size=32 --gpu=0
 
-```
-
-Train with APEX for speeding up.
-```
-python -u main.py --batch_size=16 --gpu=0,1 --grad_max_norm=1 --apex
 ```

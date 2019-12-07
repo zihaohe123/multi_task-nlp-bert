@@ -18,8 +18,11 @@ def parser():
     parser.add_argument('--test', action='store_true', default=False, help='Whether to just test the model')
     parser.add_argument('--multi_task', action='store_true', default=False, help='Whether to use multi-task learning')
     parser.add_argument('--apex', action='store_true', default=False, help='Whether to use APEX speed up.')
+    parser.add_argument('--n_tasks_drop', type=int, default=0, help='How many tasks to randomly drop in each iteration')
+    parser.add_argument('--warm_restart', action='store_true', default=False, help='Whether to use warm restart scheduler')
+    parser.add_argument('--alpha', type=float, default=0., help='alpha parameter in LBTW')
 
-    parser.add_argument('--gpu', type=str, default='', help='which gpus to use')
+    parser.add_argument('--gpu', type=str, default='', help='which GPUs to use')
     args = parser.parse_args()
     pprint.PrettyPrinter().pprint(args.__dict__)
     return args
